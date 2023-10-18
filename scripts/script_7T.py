@@ -55,9 +55,19 @@ atlas = datasets.fetch_atlas_schaefer_2018(
 atlas["name"] = "schaefer400"
 correlation_measure = ConnectivityMeasure(kind="correlation")
 repetition_time = 1.0 # CHECK
+# images processed by BT
 sub_ses = {
     'sub-01': ['r000014', 'r000017', 'r000019', 'r000020']
     }
+# Images processed by BB
+sub_ses = {
+    'sub-01':[
+        '/neurospin/optimed/BlancheBapst/FA14/Run1/Realigned_topup_coregistred_MNI/wctr000014_ep3d-bold-BB-fs-2.2mm-PA-FA14-r1-E00-M_ep3d_bold_BB_fs_2.2mm_PA_FA14_r1_20230530100725_14.nii',
+        '/neurospin/optimed/BlancheBapst/FA14/Run2/Realigned_topup_coregistred_MNI/wctr000017_ep3d-bold-BB-fs-2.2mm-PA-FA14-r2-E00-M_ep3d_bold_BB_fs_2.2mm_PA_FA14_r2_20230530100725_17.nii',
+        '/neurospin/optimed/BlancheBapst/FA7/Realigned_topup_coregistred_MNI/wctr000019_ep3d-bold-BB-fs-2.2mm-PA-FA7-E00-M_ep3d_bold_BB_fs_2.2mm_PA_FA7_20230530100725_19.nii',
+        '/neurospin/optimed/BlancheBapst/FA3/Realigned_topup_coregistred_MNI/wctr000020_ep3d-bold-BB-fs-2.2mm-PA-FA3-RR-E00-M_ep3d_bold_BB_fs_2.2mm_PA_FA3_20230530100725_20.nii'
+    ]
+}   
 
 # define regions using the atlas
 masker = NiftiLabelsMasker(
@@ -72,7 +82,7 @@ masker = NiftiLabelsMasker(
 
 
 def load_clean_data(sub, run, masker):
-    run_num = os.path.basename(run)[2:8]
+    run_num = os.path.basename(run).split('_')[-7:-1]
     confounds = glob(
         os.path.join(data_dir, sub, "func", f"rp*{run_num}*.txt")
     )[0]
@@ -100,9 +110,12 @@ for sub, runs_ in sub_ses.items():
         tmp_dir = os.path.join(OUT_ROOT, sub, "func")
         if not os.path.exists(tmp_dir):
             os.makedirs(tmp_dir)
-        runs = sorted(glob(
-            os.path.join(data_dir, sub, "func", f"w{run}*.nii.gz")
-        ))
+        ## Preprocessing by Bertrand
+        #runs = sorted(glob(
+        #    os.path.join(data_dir, sub, "func", f"w{run}*.nii.gz")
+        #))
+        ## Preprocessing by Blanche
+        runs = [run]
         param = [x for x in runs[0].split('-') if 'FA' in x and len(x) < 5]
         time_series = load_clean_data_cached(sub, runs[0], masker)
         all_time_series.append(time_series)
@@ -127,12 +140,13 @@ correlation_matrices = []
 for ts, sub, sess, run in zip(
         all_time_series, all_subjects, all_runs, all_params
 ):
+    run_num = os.path.basename(sess).split('_')[-7:-1]
     # name of csv file to save matrix as
     correlation_csv = os.path.join(
         tmp_dir,
         (
-            f"{sub}_{sess}_{task}_{run}_{atlas.name}"
-            "_pearsons_corr.csv"from nilearn.plotting import plot_connectome, plot_matrix
+            f"{sub}_{run_num}_{task}_{run}_{atlas.name}"
+            "_pearsons_corr.csv"))
     # skip calculating correlation if already done
     if os.path.isfile(correlation_csv) and not OVERWRITE:
         pass
@@ -153,7 +167,7 @@ for ts, sub, sess, run in zip(
 from sklearn.model_selection import KFold
 import matplotlib.pyplot as plt
 
-correlation_measure = ConnectivityMeasure(from nilearn.plotting import plot_connectome, plot_matrix
+correlation_measure = ConnectivityMeasure(
     discard_diagonal=True,
     # standardize='zscore_sample'
 )
@@ -173,7 +187,9 @@ for subject in np.unique(all_subjects):
         for length in lengths:
             test_conn = correlation_measure.fit_transform(
                 [tseries[test_index[0]][:length]])[0]
-            corr_length.append(np.corrcoef(ref_conn, test_conn)[0, 1])
+            rc = sym_matrix_to_vec(ref_conn, discard_diagonal=False)
+            tc = sym_matrix_to_vec(test_conn, discard_diagonal=False)
+            corr_length.append(np.corrcoef(rc, tc)[0, 1])
         corrs.append(corr_length)
     similarity[subject] = np.array(corrs)
 
@@ -189,7 +205,7 @@ ax = plt.subplot(111)
 ax.set_facecolor(facecolor)
 plt.xlabel('time series length')
 plt.ylabel('correlation of connectivity matrices')
-
+plt.savefig(os.path.join(tmp_dir, 'connectivity_learning_curve.png'))
 
 #############################################################################
 # Compute the autocorrelation of the time series
@@ -209,7 +225,12 @@ def compute_ar_coefs(x, order):
 
 all_ar_coefs = []
 order = 3
-for x in all_time_series:from nilearn.plotting import plot_connectome, plot_matrix
+for x in all_time_series:
+    ar_coefs = compute_ar_coefs(x[:n_samples].T, order)
+    all_ar_coefs.append(ar_coefs)
+
+#############################################################################
+# Make an histogram out of it
 
 bins = 20
 n = len(all_ar_coefs)
@@ -267,7 +288,16 @@ print(np.mean(all_iccs, 1))
 # compute distance between regions
 
 labels_img = masker.labels_img_
-cut_coords = find_parcellation_cut_coords(labels_img, background_from nilearn.plotting import plot_connectome, plot_matrix
+cut_coords = find_parcellation_cut_coords(labels_img, background_label=0)
+distances = euclidean_distances(cut_coords)
+discard_diagonal = False
+triu_distances = sym_matrix_to_vec(distances, discard_diagonal=discard_diagonal)
+
+n = len(all_csvs)
+n_subjects = n // 4
+xnew = [i for i in range(150)]
+
+
 plt.figure(figsize=(8, 3 * n_subjects))
 SALambda = []
 SAInf = []
